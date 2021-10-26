@@ -6,9 +6,7 @@ const bodyParser = require('body-parser');
 var admin = require("firebase-admin");
 var serviceAccount = require('./key.json')
 const porta = process.env.PORT || 3001
-const fs = require('fs')
-const Handlebars = require('handlebars');
-const hpt = require('html-pdf-node')
+const axios = require('axios')
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -107,58 +105,6 @@ function createMailOptionsIntProd(a){
 app.use(bodyParser.urlencoded({limit: '100kb',extended: false}))
 app.use(bodyParser.json())
 app.use(cors())
-
-app.all('/prova',(req,res)=>{
-    const mailOptions = {
-        from: `Prova - Epiroc Service <episerjob@gmail.com>`,
-        to: "marco.arato@epiroc.com",
-        subject: 'Test',
-        text: `This is a test`,
-        attachments: [
-            {
-                filename: 'prova.pdf',
-                path: 'https://firebasestorage.googleapis.com/v0/b/epi-serv-job.appspot.com/o/Marco%20Arato%2F20210916143441%20-%20FASSA%20SRL%20-%20SmartROC%20T35-11%20-%20TMG20SED0068.pdf?alt=media&token=b19967af-4616-4032-8b91-bf67e474cba5'
-            }
-        ]
-      };
-    transporter.sendMail(mailOptions, a=>{console.log('ok')})
-})
-app.all('/rendersj', (req,res)=>{
-    var t = fs.readFileSync('template.html','utf-8')
-    var i = req.body
-    var o = Handlebars.compile(t)
-    res.status(200).send(o(i))
-})
-
-app.all('/sjpdf', (req,res)=>{
-    var t = fs.readFileSync('template.html','utf-8')
-    var i = req.body
-    var o = Handlebars.compile(t)
-    const file = {content: o(i)}
-    const options = {format: 'A4'}
-    hpt.generatePdf(file,options)
-    .then(a=>{
-        res.send(a.toJSON())
-    })
-})
-
-app.all('/sjpdffile', (req,res)=>{
-    var t = fs.readFileSync('template.html','utf-8')
-    var i = req.body
-    console.log(i)
-    var o = Handlebars.compile(t)
-    const file = {content: o(i)}
-    const options = {format: 'A4'}
-    hpt.generatePdf(file,options)
-    .then(a=>{ 
-        var tempName = __dirname + '/temp.pdf'
-        fs.writeFile(tempName, a, err=>{
-            if(err) throw err
-            var cl = req.body.cliente11
-            res.download(tempName, cl? `${cl} - prova.pdf`:  "prova.pdf")
-        })
-    })
-})
 
 app.get('/getusers', function(req,res){
     admin.auth().listUsers(1000).then((a)=>{
@@ -300,6 +246,66 @@ app.all('/maildebug', async function(req, res,next) {
     }
 });
 
+app.get('/certiq', function(req,res){
+    let url = 'https://api.epiroc.com/certiq/v2/authentication/login?username=marco.arato@epiroc.com&password=Epiroc2019'
+    axios({
+        method: 'get',
+        url: url,
+        headers:{
+            'Ocp-Apim-Subscription-Key':'3b705806444d47f3b2308cf6c138ac74'
+        }
+    })
+    .then(a=>{
+        let url1='https://api.epiroc.com/certiq/v2/machines'
+        let code= a.data.userCode
+        axios({
+            method: 'get',
+            url: url1,
+            headers:{
+                'X-Auth-Token':code,
+                'Ocp-Apim-Subscription-Key':'3b705806444d47f3b2308cf6c138ac74'
+            }
+        })
+        .then(b=>{
+            let ins=[]
+            let m = b.data.data
+            let l =0
+            m.forEach((c)=>{
+                let url2= 'https://api.epiroc.com/certiq/v2/machines/' + c.machineItemNumber + '/serviceStatus'
+                axios({
+                    method:'get',
+                    url: url2,
+                    headers:{
+                        'X-Auth-Token':code,
+                        'Ocp-Apim-Subscription-Key':'3b705806444d47f3b2308cf6c138ac74'
+                    }
+                })
+                .then((d)=>{
+                    let url3= 'https://api.epiroc.com/certiq/v2/machines/' + c.machineItemNumber + '/machineAccumulators'
+                    axios({
+                        method:'get',
+                        url: url3,
+                        headers:{
+                            'X-Auth-Token':code,
+                            'Ocp-Apim-Subscription-Key':'3b705806444d47f3b2308cf6c138ac74'
+                        }
+                    })
+                    .then((e)=>{
+                        c.service=d.data
+                        c.accum=e.data
+                        ins.push(c)
+                        l++
+                        if(l==m.length) {
+                            res.json(ins)
+                        }
+                    })              
+                })
+                
+            })
+        })
+    })
+    .catch(e=>res.send(e))
+})
 
 app.all('/', function(req, res,next) {
     const welc = `
