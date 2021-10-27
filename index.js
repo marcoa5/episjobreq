@@ -7,6 +7,8 @@ var admin = require("firebase-admin");
 var serviceAccount = require('./key.json')
 const porta = process.env.PORT || 3001
 const axios = require('axios')
+var moment = require('moment')
+
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -247,64 +249,83 @@ app.all('/maildebug', async function(req, res,next) {
 });
 
 app.get('/certiq', function(req,res){
-    let url = 'https://api.epiroc.com/certiq/v2/authentication/login?username=marco.arato@epiroc.com&password=Epiroc2019'
+    let count = 0
+    let code=''
+    let machines=[]
+    let lung=0
+    let itemNr=[]
+    let today = moment(new Date()).format('YYYY-MM-DD')
+    let yesterday = moment(today).subtract(1,'days').format('YYYY-MM-DD')
     axios({
-        method: 'get',
-        url: url,
-        headers:{
+        method:'get',
+        url: 'https://api.epiroc.com/certiq/v2/authentication/login?username=marco.arato@epiroc.com&password=Epiroc2019',
+        headers: {
             'Ocp-Apim-Subscription-Key':'3b705806444d47f3b2308cf6c138ac74'
         }
     })
-    .then(a=>{
-        let url1='https://api.epiroc.com/certiq/v2/machines'
-        let code= a.data.userCode
+    .then(data=>{
+        code=data.data.userCode
         axios({
-            method: 'get',
-            url: url1,
-            headers:{
-                'X-Auth-Token':code,
-                'Ocp-Apim-Subscription-Key':'3b705806444d47f3b2308cf6c138ac74'
+            method:'get',
+            url: 'https://api.epiroc.com/certiq/v2/machines',
+            headers: {
+                'Ocp-Apim-Subscription-Key':'3b705806444d47f3b2308cf6c138ac74',
+                'X-Auth-Token':code
             }
         })
-        .then(b=>{
-            let ins=[]
-            let m = b.data.data
-            let l =0
-            m.forEach((c)=>{
-                let url2= 'https://api.epiroc.com/certiq/v2/machines/' + c.machineItemNumber + '/serviceStatus'
+        .then(info=>{
+            machines= info.data.data
+            lung = machines.length
+            machines.forEach(sr=>{
+                delete sr.machineId
+                delete sr.machineCustomerCenter
+                delete sr.machineType
+                delete sr.rigConfigVersion
+                delete sr.rigSoftwareVersion
+                let t6 = sr.machineName
+                let t7 = t6.split(/ - /g)
+                sr.machineSerialNr = t7[1]
+                delete sr.machineName
+                let s1 = sr.machineSite.replace(/.\(.+/,'')
+                sr.machineSite=s1
                 axios({
                     method:'get',
-                    url: url2,
-                    headers:{
-                        'X-Auth-Token':code,
-                        'Ocp-Apim-Subscription-Key':'3b705806444d47f3b2308cf6c138ac74'
+                    url: 'https://api.epiroc.com/certiq/v2/machines/'+ sr.machineItemNumber +'/kpis/' + yesterday,
+                    headers: {
+                        'Ocp-Apim-Subscription-Key':'3b705806444d47f3b2308cf6c138ac74',
+                        'X-Auth-Token':code
                     }
                 })
-                .then((d)=>{
-                    let url3= 'https://api.epiroc.com/certiq/v2/machines/' + c.machineItemNumber + '/machineAccumulators'
+                .then(gg=>{
+                    sr.LastDayEngineHours = Math.round(gg.data.dailyUtilizationEngineHours)
                     axios({
                         method:'get',
-                        url: url3,
-                        headers:{
-                            'X-Auth-Token':code,
-                            'Ocp-Apim-Subscription-Key':'3b705806444d47f3b2308cf6c138ac74'
+                        url: 'https://api.epiroc.com/certiq/v2/machines/'+ sr.machineItemNumber +'/serviceStatus',
+                        headers: {
+                            'Ocp-Apim-Subscription-Key':'3b705806444d47f3b2308cf6c138ac74',
+                            'X-Auth-Token':code
                         }
                     })
-                    .then((e)=>{
-                        c.service=d.data
-                        c.accum=e.data
-                        ins.push(c)
-                        l++
-                        if(l==m.length) {
-                            res.json(ins)
-                        }
-                    })              
+                    .then((service)=>{
+                        let s = service.data
+                        count++
+                        //console.log(count)
+                        s.forEach(sd=>{
+                            if(sd.serviceStatus=='Upcoming' && sd.serviceType=='Engine'){
+                               sr.serviceStep = sd.serviceAccumulator
+                               sr.hoursLeftToService = sd.hoursLeftToService
+                               sr.servicePredictedDate = sd.servicePredictedDate
+                            }
+                        })
+                        if(count==machines.length){res.json(machines)}
+                    })
                 })
-                
             })
+            
         })
+        .catch(e=>console.log(e))
     })
-    .catch(e=>res.send(e))
+    .catch(e=>console.log(e))
 })
 
 app.all('/', function(req, res,next) {
