@@ -249,12 +249,13 @@ app.all('/maildebug', async function(req, res,next) {
 });
 
 app.get('/certiq', function(req,res){
+    console.log(req.query)
     let count = 0
     let code=''
     let machines=[]
     let lung=0
     let itemNr=[]
-    let today = moment(new Date()).format('YYYY-MM-DD')
+    let today = req.query.day
     let yesterday = moment(today).subtract(1,'days').format('YYYY-MM-DD')
     axios({
         method:'get',
@@ -265,6 +266,7 @@ app.get('/certiq', function(req,res){
     })
     .then(data=>{
         code=data.data.userCode
+        console.log(code)
         axios({
             method:'get',
             url: 'https://api.epiroc.com/certiq/v2/machines',
